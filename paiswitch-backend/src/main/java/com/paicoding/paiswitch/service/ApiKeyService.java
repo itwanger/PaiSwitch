@@ -74,6 +74,14 @@ public class ApiKeyService {
         return encryptionService.decrypt(apiKey.getEncryptedKey());
     }
 
+    @Transactional(readOnly = true)
+    public String getDecryptedApiKeyOptional(Long userId, String providerCode) {
+        return apiKeyRepository.findByUserIdAndProviderCode(userId, providerCode)
+                .filter(ApiKey::getIsValid)
+                .map(apiKey -> encryptionService.decrypt(apiKey.getEncryptedKey()))
+                .orElse(null);
+    }
+
     @Transactional
     public void deleteApiKey(Long userId, String providerCode) {
         ModelProvider provider = providerRepository.findByCode(providerCode)

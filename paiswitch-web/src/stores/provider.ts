@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { providerApi, apiKeyApi, configApi, switchApi } from '@/api'
-import type { ProviderInfo, ApiKeyInfo, ConfigInfo, SwitchResult, ProviderConfigUpdateRequest, ProviderTestRequest, ProviderTestResult } from '@/types'
+import type { ProviderInfo, ApiKeyInfo, ApiKeyPlainInfo, ConfigInfo, SwitchResult, ProviderConfigUpdateRequest, ProviderTestRequest, ProviderTestResult } from '@/types'
 
 export const useProviderStore = defineStore('provider', () => {
   const providers = ref<ProviderInfo[]>([])
@@ -36,6 +36,10 @@ export const useProviderStore = defineStore('provider', () => {
     await apiKeyApi.delete(providerCode)
     await fetchApiKeys()
     await fetchProviders()
+  }
+
+  async function getApiKeyPlain(providerCode: string): Promise<ApiKeyPlainInfo> {
+    return apiKeyApi.getPlain(providerCode)
   }
 
   async function switchProvider(providerCode: string): Promise<SwitchResult> {
@@ -74,6 +78,7 @@ export const useProviderStore = defineStore('provider', () => {
     fetchConfig,
     setApiKey,
     deleteApiKey,
+    getApiKeyPlain,
     switchProvider,
     naturalLanguageSwitch,
     updateProviderConfig,

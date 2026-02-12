@@ -4,6 +4,7 @@ import type {
   UserInfo,
   ProviderInfo,
   ApiKeyInfo,
+  ApiKeyPlainInfo,
   ConfigInfo,
   BackupInfo,
   SwitchResult,
@@ -56,6 +57,9 @@ export const apiKeyApi = {
     apiPost<ApiKeyInfo>('/api-keys', { providerCode, apiKey }),
 
   getAll: () => apiGet<ApiKeyInfo[]>('/api-keys'),
+
+  getPlain: (providerCode: string) =>
+    apiGet<ApiKeyPlainInfo>(`/api-keys/${providerCode}/plain`),
 
   delete: (providerCode: string) =>
     apiDelete<void>(`/api-keys/${providerCode}`)

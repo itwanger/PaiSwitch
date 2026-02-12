@@ -161,6 +161,19 @@ public class ProviderService {
                 ? request.getModelName()
                 : provider.getModelName();
 
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return ProviderDto.TestResult.builder()
+                    .success(false)
+                    .message("Base URL 未配置")
+                    .build();
+        }
+        if (modelName == null || modelName.isBlank()) {
+            return ProviderDto.TestResult.builder()
+                    .success(false)
+                    .message("模型名称未配置")
+                    .build();
+        }
+
         // Get API key from request or from stored keys
         String apiKey = request.getApiKey();
         if (apiKey == null || apiKey.isEmpty()) {
@@ -177,93 +190,306 @@ public class ProviderService {
                     .build();
         }
 
-        return performTestRequest(baseUrl, modelName, apiKey);
+        return performTestRequest(provider.getCode(), baseUrl, modelName, apiKey);
     }
 
-    private ProviderDto.TestResult performTestRequest(String baseUrl, String modelName, String apiKey) {
+    private ProviderDto.TestResult performTestRequest(String providerCode, String baseUrl, String modelName, String apiKey) {
         long startTime = System.currentTimeMillis();
+        String testUrl = "";
 
         try {
             // Normalize base URL
-            String normalizedUrl = baseUrl;
-            if (!normalizedUrl.startsWith("http")) {
-                normalizedUrl = "https://" + normalizedUrl;
-            }
-            if (normalizedUrl.endsWith("/")) {
-                normalizedUrl = normalizedUrl.substring(0, normalizedUrl.length() - 1);
-            }
+            String normalizedUrl = normalizeBaseUrl(baseUrl);
+            String normalizedApiKey = normalizeApiKey(apiKey);
+            boolean useOpenRouterApi = isOpenRouterProvider(providerCode, normalizedUrl);
 
-            // Build test request - simple models list or messages endpoint
-            String testUrl = normalizedUrl + "/v1/messages";
+            testUrl = useOpenRouterApi
+                    ? buildOpenRouterChatCompletionsUrl(normalizedUrl)
+                    : buildMessagesTestUrl(normalizedUrl);
+            String requestBody = useOpenRouterApi
+                    ? buildOpenRouterTestRequestBody(modelName)
+                    : """
+                        {
+                            "model": "%s",
+                            "max_tokens": 10,
+                            "messages": [{"role": "user", "content": "Hi"}]
+                        }
+                        """.formatted(modelName);
 
-            String requestBody = """
-                {
-                    "model": "%s",
-                    "max_tokens": 10,
-                    "messages": [{"role": "user", "content": "Hi"}]
-                }
-                """.formatted(modelName);
-
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(testUrl))
                     .header("Content-Type", "application/json")
-                    .header("x-api-key", apiKey)
-                    .header("anthropic-version", "2023-06-01")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                    .timeout(Duration.ofSeconds(30))
-                    .build();
+                    .timeout(Duration.ofSeconds(30));
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            long responseTime = System.currentTimeMillis() - startTime;
-
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                return ProviderDto.TestResult.builder()
-                        .success(true)
-                        .message("连接成功")
-                        .modelName(modelName)
-                        .responseTimeMs(responseTime)
-                        .build();
-            } else if (response.statusCode() == 401) {
-                return ProviderDto.TestResult.builder()
-                        .success(false)
-                        .message("API Key 无效")
-                        .responseTimeMs(responseTime)
-                        .build();
-            } else if (response.statusCode() == 404) {
-                return ProviderDto.TestResult.builder()
-                        .success(false)
-                        .message("模型不存在或 Base URL 错误")
-                        .responseTimeMs(responseTime)
-                        .build();
+            if (useOpenRouterApi) {
+                requestBuilder.header("Authorization", "Bearer " + normalizedApiKey);
             } else {
-                String errorMsg = extractErrorMessage(response.body());
-                return ProviderDto.TestResult.builder()
-                        .success(false)
-                        .message("请求失败: " + errorMsg)
-                        .responseTimeMs(responseTime)
-                        .build();
+                requestBuilder
+                        .header("x-api-key", normalizedApiKey)
+                        .header("anthropic-version", "2023-06-01");
             }
 
+            log.info("Test request -> provider={}, url={}, auth={}, apiKey={}, body={}",
+                    providerCode,
+                    testUrl,
+                    useOpenRouterApi ? "Authorization: Bearer" : "x-api-key",
+                    maskApiKey(normalizedApiKey),
+                    singleLine(requestBody));
+
+            HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+            log.info("Test response <- provider={}, url={}, status={}, body={}",
+                    providerCode,
+                    testUrl,
+                    response.statusCode(),
+                    truncate(response.body(), 4000));
+
+            if (useOpenRouterApi && shouldRetryOpenRouterWithAvailableProviders(response)) {
+                List<String> availableProviders = extractOpenRouterAvailableProviders(response.body());
+                if (!availableProviders.isEmpty()) {
+                    String retryRequestBody = buildOpenRouterTestRequestBody(modelName, availableProviders);
+                    HttpRequest retryRequest = buildHttpRequest(testUrl, retryRequestBody, true, normalizedApiKey);
+                    log.info("Test retry request -> provider={}, url={}, order={}, body={}",
+                            providerCode,
+                            testUrl,
+                            availableProviders,
+                            singleLine(retryRequestBody));
+                    HttpResponse<String> retryResponse = httpClient.send(retryRequest, HttpResponse.BodyHandlers.ofString());
+                    log.info("Test retry response <- provider={}, url={}, status={}, body={}",
+                            providerCode,
+                            testUrl,
+                            retryResponse.statusCode(),
+                            truncate(retryResponse.body(), 4000));
+                    return buildTestResult(retryResponse, modelName, startTime);
+                }
+            }
+
+            return buildTestResult(response, modelName, startTime);
+
         } catch (java.net.ConnectException e) {
+            log.warn("Test connection connect exception: provider={}, url={}, message={}", providerCode, testUrl, e.getMessage());
             return ProviderDto.TestResult.builder()
                     .success(false)
                     .message("无法连接到服务器，请检查 Base URL")
                     .responseTimeMs(System.currentTimeMillis() - startTime)
                     .build();
         } catch (java.net.SocketTimeoutException e) {
+            log.warn("Test connection timeout: provider={}, url={}, message={}", providerCode, testUrl, e.getMessage());
             return ProviderDto.TestResult.builder()
                     .success(false)
                     .message("连接超时，请检查网络或 Base URL")
                     .responseTimeMs(System.currentTimeMillis() - startTime)
                     .build();
         } catch (Exception e) {
-            log.error("Test connection failed: {}", e.getMessage());
+            log.error("Test connection failed: provider={}, url={}, message={}", providerCode, testUrl, e.getMessage(), e);
             return ProviderDto.TestResult.builder()
                     .success(false)
                     .message("测试失败: " + e.getMessage())
                     .responseTimeMs(System.currentTimeMillis() - startTime)
                     .build();
         }
+    }
+
+    private String maskApiKey(String apiKey) {
+        if (apiKey == null || apiKey.isBlank()) {
+            return "***";
+        }
+        int length = apiKey.length();
+        if (length <= 8) {
+            return "***";
+        }
+        return apiKey.substring(0, 4) + "..." + apiKey.substring(length - 4);
+    }
+
+    private String singleLine(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replaceAll("\\s+", " ").trim();
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        if (value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength) + "...(truncated)";
+    }
+
+    private String normalizeApiKey(String apiKey) {
+        if (apiKey == null) {
+            return "";
+        }
+        String normalized = apiKey.trim();
+        if (normalized.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            return normalized.substring(7).trim();
+        }
+        return normalized;
+    }
+
+    private boolean isOpenRouterProvider(String providerCode, String normalizedUrl) {
+        return "openrouter".equalsIgnoreCase(providerCode) || normalizedUrl.toLowerCase().contains("openrouter.ai");
+    }
+
+    private String buildOpenRouterChatCompletionsUrl(String normalizedUrl) {
+        if (normalizedUrl.endsWith("/v1/chat/completions") || normalizedUrl.endsWith("/chat/completions")) {
+            return normalizedUrl;
+        }
+        if (normalizedUrl.endsWith("/v1")) {
+            return normalizedUrl + "/chat/completions";
+        }
+        return normalizedUrl + "/v1/chat/completions";
+    }
+
+    private String buildOpenRouterTestRequestBody(String modelName) {
+        String providerHint = extractModelProviderHint(modelName);
+        return buildOpenRouterTestRequestBody(modelName,
+                providerHint == null ? List.of() : List.of(providerHint));
+    }
+
+    private String buildOpenRouterTestRequestBody(String modelName, List<String> providerOrder) {
+        if (providerOrder == null || providerOrder.isEmpty()) {
+            return """
+                {
+                    "model": "%s",
+                    "max_tokens": 10,
+                    "messages": [{"role": "user", "content": "Hi"}]
+                }
+                """.formatted(modelName);
+        }
+
+        String orderJson = providerOrder.stream()
+                .map(provider -> "\"" + provider + "\"")
+                .collect(Collectors.joining(", "));
+        return """
+            {
+                "model": "%s",
+                "max_tokens": 10,
+                "messages": [{"role": "user", "content": "Hi"}],
+                "provider": {
+                    "order": [%s],
+                    "allow_fallbacks": true
+                }
+            }
+            """.formatted(modelName, orderJson);
+    }
+
+    private String extractModelProviderHint(String modelName) {
+        if (modelName == null || modelName.isBlank()) {
+            return null;
+        }
+        String normalized = modelName.trim();
+        int slashIndex = normalized.indexOf('/');
+        if (slashIndex <= 0) {
+            return null;
+        }
+        String providerHint = normalized.substring(0, slashIndex).trim().toLowerCase();
+        return providerHint.isEmpty() ? null : providerHint;
+    }
+
+    private ProviderDto.TestResult buildTestResult(HttpResponse<String> response, String modelName, long startTime) {
+        long responseTime = System.currentTimeMillis() - startTime;
+
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return ProviderDto.TestResult.builder()
+                    .success(true)
+                    .message("连接成功")
+                    .modelName(modelName)
+                    .responseTimeMs(responseTime)
+                    .build();
+        } else if (response.statusCode() == 401) {
+            return ProviderDto.TestResult.builder()
+                    .success(false)
+                    .message("API Key 无效")
+                    .responseTimeMs(responseTime)
+                    .build();
+        } else if (response.statusCode() == 404) {
+            String errorMsg = extractErrorMessage(response.body());
+            return ProviderDto.TestResult.builder()
+                    .success(false)
+                    .message("请求失败: " + errorMsg)
+                    .responseTimeMs(responseTime)
+                    .build();
+        } else {
+            String errorMsg = extractErrorMessage(response.body());
+            return ProviderDto.TestResult.builder()
+                    .success(false)
+                    .message("请求失败: " + errorMsg)
+                    .responseTimeMs(responseTime)
+                    .build();
+        }
+    }
+
+    private HttpRequest buildHttpRequest(String testUrl, String requestBody, boolean useOpenRouterApi, String apiKey) {
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                .uri(URI.create(testUrl))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .timeout(Duration.ofSeconds(30));
+
+        if (useOpenRouterApi) {
+            requestBuilder.header("Authorization", "Bearer " + apiKey);
+        } else {
+            requestBuilder
+                    .header("x-api-key", apiKey)
+                    .header("anthropic-version", "2023-06-01");
+        }
+        return requestBuilder.build();
+    }
+
+    private boolean shouldRetryOpenRouterWithAvailableProviders(HttpResponse<String> response) {
+        if (response.statusCode() != 404 || response.body() == null) {
+            return false;
+        }
+        String body = response.body();
+        return body.contains("No allowed providers are available")
+                && body.contains("available_providers");
+    }
+
+    private List<String> extractOpenRouterAvailableProviders(String responseBody) {
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(responseBody);
+            com.fasterxml.jackson.databind.JsonNode providersNode = root.path("error")
+                    .path("metadata")
+                    .path("available_providers");
+            if (!providersNode.isArray()) {
+                return List.of();
+            }
+            List<String> providers = new java.util.ArrayList<>();
+            for (com.fasterxml.jackson.databind.JsonNode node : providersNode) {
+                String provider = node.asText();
+                if (provider != null && !provider.isBlank()) {
+                    providers.add(provider.trim().toLowerCase());
+                }
+            }
+            return providers;
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private String normalizeBaseUrl(String baseUrl) {
+        String normalizedUrl = baseUrl.trim();
+        if (!normalizedUrl.startsWith("http://") && !normalizedUrl.startsWith("https://")) {
+            normalizedUrl = "https://" + normalizedUrl;
+        }
+        while (normalizedUrl.endsWith("/")) {
+            normalizedUrl = normalizedUrl.substring(0, normalizedUrl.length() - 1);
+        }
+        return normalizedUrl;
+    }
+
+    private String buildMessagesTestUrl(String normalizedUrl) {
+        if (normalizedUrl.endsWith("/v1/messages") || normalizedUrl.endsWith("/messages")) {
+            return normalizedUrl;
+        }
+        if (normalizedUrl.endsWith("/v1")) {
+            return normalizedUrl + "/messages";
+        }
+        return normalizedUrl + "/v1/messages";
     }
 
     private String extractErrorMessage(String responseBody) {

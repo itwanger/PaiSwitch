@@ -68,6 +68,11 @@ export interface ApiKeyInfo {
   createdAt: string
 }
 
+export interface ApiKeyPlainInfo {
+  providerCode: string
+  apiKey?: string | null
+}
+
 export interface ConfigInfo {
   id: number
   userId: number

@@ -40,6 +40,19 @@ public class ApiKeyController {
         return ApiResponse.success(apiKeyService.getUserApiKeys(userId));
     }
 
+    @Operation(summary = "Get plain API key for a provider")
+    @GetMapping("/{providerCode}/plain")
+    public ApiResponse<ApiKeyDto.PlainKeyInfo> getPlainApiKey(
+            @RequestHeader("Authorization") String authorization,
+            @PathVariable String providerCode) {
+        Long userId = extractUserId(authorization);
+        String apiKey = apiKeyService.getDecryptedApiKeyOptional(userId, providerCode);
+        return ApiResponse.success(ApiKeyDto.PlainKeyInfo.builder()
+                .providerCode(providerCode)
+                .apiKey(apiKey)
+                .build());
+    }
+
     @Operation(summary = "Delete API key for a provider")
     @DeleteMapping("/{providerCode}")
     public ApiResponse<Void> deleteApiKey(

@@ -2,18 +2,25 @@
 import { ref } from 'vue'
 import { useProviderStore } from '@/stores/provider'
 import { useToastStore } from '@/stores/toast'
-import type { ProviderInfo } from '@/types'
+import type { ProviderInfo, ProviderConfigUpdateRequest } from '@/types'
 
 const providerStore = useProviderStore()
 const toastStore = useToastStore()
 
-const showKeyModal = ref(false)
 const showConfigModal = ref(false)
 const selectedProvider = ref<ProviderInfo | null>(null)
-const apiKey = ref('')
+const configApiKey = ref('')
+const showApiKey = ref(false)
+const loadingApiKey = ref(false)
 const saving = ref(false)
 const testing = ref(false)
 const testResult = ref<{ success: boolean; message: string; responseTimeMs?: number } | null>(null)
+const originalApiKey = ref('')
+const originalConfig = ref({
+  baseUrl: '',
+  modelName: '',
+  modelNameSmall: ''
+})
 
 // Config edit form
 const configForm = ref({
@@ -22,36 +29,48 @@ const configForm = ref({
   modelNameSmall: ''
 })
 
-function openKeyModal(provider: ProviderInfo) {
-  selectedProvider.value = provider
-  apiKey.value = ''
-  showKeyModal.value = true
+function normalizeInput(value?: string | null): string {
+  return (value || '').trim()
 }
 
-function openConfigModal(provider: ProviderInfo) {
+async function openConfigModal(provider: ProviderInfo) {
+  const baseUrl = normalizeInput(provider.baseUrl)
+  const modelName = normalizeInput(provider.modelName)
+  const modelNameSmall = normalizeInput(provider.modelNameSmall)
+
   selectedProvider.value = provider
   configForm.value = {
-    baseUrl: provider.baseUrl || '',
-    modelName: provider.modelName || '',
-    modelNameSmall: provider.modelNameSmall || ''
+    baseUrl,
+    modelName,
+    modelNameSmall
   }
+  originalConfig.value = {
+    baseUrl,
+    modelName,
+    modelNameSmall
+  }
+  configApiKey.value = ''
+  originalApiKey.value = ''
+  showApiKey.value = false
   testResult.value = null
   showConfigModal.value = true
-}
 
-async function saveApiKey() {
-  if (!selectedProvider.value || !apiKey.value) return
-
-  saving.value = true
+  loadingApiKey.value = true
   try {
-    await providerStore.setApiKey(selectedProvider.value.code, apiKey.value)
-    showKeyModal.value = false
-    toastStore.success(`${selectedProvider.value.name} API Key 已保存`)
-  } catch (e: unknown) {
-    const err = e as { response?: { data?: { message?: string } } }
-    toastStore.error(err.response?.data?.message || '保存失败，请重试')
+    const keyInfo = await providerStore.getApiKeyPlain(provider.code)
+    if (selectedProvider.value?.code !== provider.code) {
+      return
+    }
+    const apiKeyValue = normalizeInput(keyInfo?.apiKey)
+    configApiKey.value = apiKeyValue
+    originalApiKey.value = apiKeyValue
+  } catch {
+    configApiKey.value = ''
+    originalApiKey.value = ''
   } finally {
-    saving.value = false
+    if (selectedProvider.value?.code === provider.code) {
+      loadingApiKey.value = false
+    }
   }
 }
 
@@ -60,13 +79,54 @@ async function saveConfig() {
 
   saving.value = true
   try {
-    await providerStore.updateProviderConfig(selectedProvider.value.code, {
-      baseUrl: configForm.value.baseUrl || undefined,
-      modelName: configForm.value.modelName || undefined,
-      modelNameSmall: configForm.value.modelNameSmall || undefined
-    })
+    const nextBaseUrl = normalizeInput(configForm.value.baseUrl)
+    const nextModelName = normalizeInput(configForm.value.modelName)
+    const nextModelNameSmall = normalizeInput(configForm.value.modelNameSmall)
+    const nextApiKey = normalizeInput(configApiKey.value)
+
+    const configPayload: ProviderConfigUpdateRequest = {}
+    if (nextBaseUrl !== originalConfig.value.baseUrl && nextBaseUrl) {
+      configPayload.baseUrl = nextBaseUrl
+    }
+    if (nextModelName !== originalConfig.value.modelName && nextModelName) {
+      configPayload.modelName = nextModelName
+    }
+    if (nextModelNameSmall !== originalConfig.value.modelNameSmall) {
+      configPayload.modelNameSmall = nextModelNameSmall
+    }
+
+    const hasConfigChanges = Object.keys(configPayload).length > 0
+    const apiKeyChanged = nextApiKey !== originalApiKey.value
+    const skippedApiKeyDeletion = apiKeyChanged && !nextApiKey && !!originalApiKey.value
+    const shouldUpdateApiKey = apiKeyChanged && !!nextApiKey
+
+    if (!hasConfigChanges && !shouldUpdateApiKey) {
+      if (skippedApiKeyDeletion) {
+        toastStore.error('API Key 置空不会删除，如需删除请使用“删除”按钮')
+        return
+      }
+      toastStore.success('没有检测到配置变化')
+      return
+    }
+
+    if (hasConfigChanges) {
+      await providerStore.updateProviderConfig(selectedProvider.value.code, configPayload)
+    }
+    if (shouldUpdateApiKey) {
+      await providerStore.setApiKey(selectedProvider.value.code, nextApiKey)
+    }
     showConfigModal.value = false
-    toastStore.success(`${selectedProvider.value.name} 配置已更新`)
+    if (hasConfigChanges && shouldUpdateApiKey) {
+      toastStore.success(`${selectedProvider.value.name} 配置和 API Key 已更新`)
+    } else if (hasConfigChanges) {
+      if (skippedApiKeyDeletion) {
+        toastStore.success(`${selectedProvider.value.name} 配置已更新（API Key 未变更）`)
+      } else {
+        toastStore.success(`${selectedProvider.value.name} 配置已更新`)
+      }
+    } else {
+      toastStore.success(`${selectedProvider.value.name} API Key 已更新`)
+    }
   } catch (e: unknown) {
     const err = e as { response?: { data?: { message?: string } } }
     toastStore.error(err.response?.data?.message || '保存失败，请重试')
@@ -83,7 +143,8 @@ async function testConnection() {
   try {
     const result = await providerStore.testProviderConnection(selectedProvider.value.code, {
       baseUrl: configForm.value.baseUrl || undefined,
-      modelName: configForm.value.modelName || undefined
+      modelName: configForm.value.modelName || undefined,
+      apiKey: configApiKey.value.trim() || undefined
     })
     testResult.value = result
     if (result.success) {
@@ -164,28 +225,15 @@ async function deleteKey(providerCode: string) {
 
         <div class="flex gap-2">
           <button
-            v-if="provider.hasApiKey"
-            @click="openKeyModal(provider)"
-            class="flex-1 px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-          >
-            更新 API Key
-          </button>
-          <button
-            v-else
-            @click="openKeyModal(provider)"
-            class="flex-1 px-3 py-2 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors"
-          >
-            配置 API Key
-          </button>
-          <button
             @click="openConfigModal(provider)"
-            class="px-3 py-2 text-sm bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg transition-colors"
+            class="flex-1 px-3 py-2 text-sm bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg transition-colors flex items-center justify-center"
             title="编辑模型配置"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
             </svg>
+            <span class="ml-1">编辑配置</span>
           </button>
           <button
             v-if="provider.hasApiKey"
@@ -193,45 +241,6 @@ async function deleteKey(providerCode: string) {
             class="px-3 py-2 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors"
           >
             删除
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- API Key Modal -->
-    <div
-      v-if="showKeyModal"
-      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-      @click.self="showKeyModal = false"
-    >
-      <div class="bg-white rounded-xl p-6 w-full max-w-md">
-        <h3 class="text-lg font-semibold text-gray-900 mb-4">
-          配置 API Key - {{ selectedProvider?.name }}
-        </h3>
-
-        <div class="mb-4">
-          <label class="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-          <input
-            v-model="apiKey"
-            type="password"
-            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-            placeholder="请输入 API Key"
-          />
-        </div>
-
-        <div class="flex justify-end gap-3">
-          <button
-            @click="showKeyModal = false"
-            class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            取消
-          </button>
-          <button
-            @click="saveApiKey"
-            :disabled="saving || !apiKey"
-            class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg disabled:opacity-50 transition-colors"
-          >
-            {{ saving ? '保存中...' : '保存' }}
           </button>
         </div>
       </div>
@@ -278,6 +287,31 @@ async function deleteKey(providerCode: string) {
               placeholder="例如: gpt-3.5-turbo"
             />
           </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">API Key (可选)</label>
+            <div class="flex items-center gap-2">
+              <input
+                v-model="configApiKey"
+                :type="showApiKey ? 'text' : 'password'"
+                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                :placeholder="loadingApiKey ? '正在加载 API Key...' : '留空则不更新 API Key'"
+                :disabled="loadingApiKey"
+              />
+              <button
+                type="button"
+                @click="showApiKey = !showApiKey"
+                :disabled="loadingApiKey || !configApiKey"
+                class="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50 transition-colors"
+                :title="showApiKey ? '隐藏 API Key' : '显示 API Key'"
+              >
+                {{ showApiKey ? '隐藏' : '👀' }}
+              </button>
+            </div>
+            <p v-if="!showApiKey && configApiKey" class="mt-1 text-xs text-gray-500">
+              当前显示为 ****（已隐藏）
+            </p>
+          </div>
         </div>
 
         <!-- Test Result -->
@@ -301,7 +335,7 @@ async function deleteKey(providerCode: string) {
         </div>
 
         <p class="mt-4 text-xs text-gray-500">
-          提示：配置修改后仅更新数据库，切换模型时才会同步到 settings.json
+          提示：API Key 留空表示不修改；配置修改后仅更新数据库，切换模型时才会同步到 settings.json
         </p>
 
         <div class="flex justify-end gap-3 mt-6">
@@ -313,7 +347,7 @@ async function deleteKey(providerCode: string) {
           </button>
           <button
             @click="testConnection"
-            :disabled="testing"
+            :disabled="testing || loadingApiKey"
             class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 transition-colors flex items-center gap-2"
           >
             <svg v-if="testing" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -324,7 +358,7 @@ async function deleteKey(providerCode: string) {
           </button>
           <button
             @click="saveConfig"
-            :disabled="saving"
+            :disabled="saving || loadingApiKey"
             class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg disabled:opacity-50 transition-colors"
           >
             {{ saving ? '保存中...' : '保存' }}

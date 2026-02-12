@@ -42,6 +42,15 @@ public class ApiKeyDto {
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder
+    public static class PlainKeyInfo {
+        private String providerCode;
+        private String apiKey;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
     public static class ValidateRequest {
         @NotBlank(message = "Provider code is required")
         private String providerCode;
