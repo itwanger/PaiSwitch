@@ -73,4 +73,35 @@ public class ProviderDto {
         private Boolean isActive;
         private String iconUrl;
     }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ConfigUpdateRequest {
+        private String baseUrl;
+        private String modelName;
+        private String modelNameSmall;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class TestRequest {
+        private String baseUrl;
+        private String modelName;
+        private String apiKey;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class TestResult {
+        private boolean success;
+        private String message;
+        private String modelName;
+        private Long responseTimeMs;
+    }
 }

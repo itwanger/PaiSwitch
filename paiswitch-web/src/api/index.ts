@@ -7,7 +7,10 @@ import type {
   ConfigInfo,
   BackupInfo,
   SwitchResult,
-  NaturalLanguageResponse
+  NaturalLanguageResponse,
+  ProviderConfigUpdateRequest,
+  ProviderTestRequest,
+  ProviderTestResult
 } from '@/types'
 
 // Auth API
@@ -38,7 +41,13 @@ export const providerApi = {
   }) => apiPost<ProviderInfo>('/providers/custom', data),
 
   update: (code: string, data: Partial<ProviderInfo>) =>
-    apiPut<ProviderInfo>(`/providers/${code}`, data)
+    apiPut<ProviderInfo>(`/providers/${code}`, data),
+
+  updateConfig: (code: string, data: ProviderConfigUpdateRequest) =>
+    apiPut<ProviderInfo>(`/providers/${code}/config`, data),
+
+  testConnection: (code: string, data?: ProviderTestRequest) =>
+    apiPost<ProviderTestResult>(`/providers/${code}/test`, data || {})
 }
 
 // API Key API

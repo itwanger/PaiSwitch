@@ -66,6 +66,31 @@ public class ProviderController {
         return ApiResponse.success(providerService.updateProvider(userId, code, request));
     }
 
+    @Operation(summary = "Update provider configuration (baseUrl, modelName, modelNameSmall)")
+    @PutMapping("/{code}/config")
+    @SecurityRequirement(name = "bearerAuth")
+    public ApiResponse<ProviderDto.ProviderInfo> updateProviderConfig(
+            @RequestHeader("Authorization") String authorization,
+            @PathVariable String code,
+            @RequestBody ProviderDto.ConfigUpdateRequest request) {
+        Long userId = extractUserId(authorization);
+        return ApiResponse.success(providerService.updateProviderConfig(userId, code, request));
+    }
+
+    @Operation(summary = "Test provider API connection")
+    @PostMapping("/{code}/test")
+    @SecurityRequirement(name = "bearerAuth")
+    public ApiResponse<ProviderDto.TestResult> testProviderConnection(
+            @RequestHeader("Authorization") String authorization,
+            @PathVariable String code,
+            @RequestBody(required = false) ProviderDto.TestRequest request) {
+        Long userId = extractUserId(authorization);
+        if (request == null) {
+            request = new ProviderDto.TestRequest();
+        }
+        return ApiResponse.success(providerService.testProviderConnection(userId, code, request));
+    }
+
     private Long extractUserId(String authorization) {
         String token = authorization.replace("Bearer ", "");
         return jwtTokenProvider.getUserIdFromToken(token);

@@ -72,6 +72,44 @@ npm run dev
 
 ---
 
+## 本地配置自动同步
+
+后端启动时会自动读取本地 `~/.claude/settings.json` 配置：
+
+**自动同步内容：**
+- 当前使用的模型提供商（根据 `ANTHROPIC_BASE_URL` 自动检测）
+- API Key（自动加密存储到数据库）
+- API 超时时间
+
+**支持的提供商检测：**
+
+| Base URL | 提供商 |
+|----------|--------|
+| api.anthropic.com | Claude (Official) |
+| api.deepseek.com | DeepSeek V3 |
+| open.bigmodel.cn | 智谱 AI |
+| openrouter.ai | OpenRouter |
+
+**示例：**
+
+如果你的 `~/.claude/settings.json` 是：
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "your-zhipu-api-key",
+    "ANTHROPIC_MODEL": "glm-4.5"
+  }
+}
+```
+
+后端启动后会自动：
+1. 检测到当前使用 **智谱 AI**
+2. 将 API Key 加密存储
+3. Web 登录后显示当前模型为 **Zhipu AI**
+
+---
+
 ### 方式三：命令行脚本
 
 ```bash

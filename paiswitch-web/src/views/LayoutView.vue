@@ -3,6 +3,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useProviderStore } from '@/stores/provider'
 import { onMounted } from 'vue'
+import Toast from '@/components/Toast.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -27,6 +28,9 @@ function handleLogout() {
 
 <template>
   <div class="min-h-screen flex">
+    <!-- Toast Notifications -->
+    <Toast />
+
     <!-- Sidebar -->
     <aside class="w-64 bg-white border-r border-gray-200">
       <div class="p-4 border-b border-gray-200">

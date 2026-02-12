@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useProviderStore } from '@/stores/provider'
+import { useToastStore } from '@/stores/toast'
 
 const providerStore = useProviderStore()
+const toastStore = useToastStore()
 
 const stats = computed(() => {
   const total = providerStore.providers.length
@@ -11,6 +13,15 @@ const stats = computed(() => {
 })
 
 const currentProvider = computed(() => providerStore.currentConfig?.currentProvider)
+
+async function handleQuickSwitch(providerCode: string) {
+  const result = await providerStore.switchProvider(providerCode)
+  if (result.success) {
+    toastStore.success(`已切换到 ${result.currentProvider?.name}`)
+  } else {
+    toastStore.error(`切换失败: ${result.message}`)
+  }
+}
 </script>
 
 <template>
@@ -44,7 +55,7 @@ const currentProvider = computed(() => providerStore.currentConfig?.currentProvi
         <button
           v-for="provider in providerStore.providers.filter(p => p.hasApiKey)"
           :key="provider.code"
-          @click="providerStore.switchProvider(provider.code)"
+          @click="handleQuickSwitch(provider.code)"
           class="p-4 border rounded-lg hover:border-primary-500 hover:bg-primary-50 transition-colors"
           :class="{ 'border-primary-500 bg-primary-50': currentProvider?.code === provider.code }"
         >

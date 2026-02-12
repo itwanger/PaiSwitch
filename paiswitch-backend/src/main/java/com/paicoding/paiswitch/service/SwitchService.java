@@ -33,6 +33,7 @@ public class SwitchService {
     private final SwitchHistoryRepository switchHistoryRepository;
     private final ConfigService configService;
     private final ApiKeyService apiKeyService;
+    private final SettingsWriterService settingsWriterService;
 
     @Transactional
     public SwitchDto.SwitchResult switchToProvider(Long userId, String providerCode, SwitchType switchType,
@@ -78,6 +79,9 @@ public class SwitchService {
             configRepository.save(config);
 
             apiKeyService.updateLastUsedAt(userId, providerCode);
+
+            // Write to settings.json with latest provider config from database
+            settingsWriterService.writeToSettings(userId, targetProvider);
 
             history.setSuccess(true);
             switchHistoryRepository.save(history);

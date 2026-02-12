@@ -37,6 +37,25 @@ export interface ProviderInfo {
   createdAt: string
 }
 
+export interface ProviderConfigUpdateRequest {
+  baseUrl?: string
+  modelName?: string
+  modelNameSmall?: string
+}
+
+export interface ProviderTestRequest {
+  baseUrl?: string
+  modelName?: string
+  apiKey?: string
+}
+
+export interface ProviderTestResult {
+  success: boolean
+  message: string
+  modelName?: string
+  responseTimeMs?: number
+}
+
 export interface ApiKeyInfo {
   id: number
   providerId: number

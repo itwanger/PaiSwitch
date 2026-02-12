@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useProviderStore } from '@/stores/provider'
+import { useToastStore } from '@/stores/toast'
 import type { BackupInfo } from '@/types'
 
 const providerStore = useProviderStore()
+const toastStore = useToastStore()
 
 const backups = computed(() => [] as BackupInfo[]) // TODO: fetch backups
 
 async function handleSwitch(providerCode: string) {
   const result = await providerStore.switchProvider(providerCode)
   if (result.success) {
-    alert(`已切换到 ${result.currentProvider?.name}`)
+    toastStore.success(`已切换到 ${result.currentProvider?.name}`)
   } else {
-    alert(`切换失败: ${result.message}`)
+    toastStore.error(`切换失败: ${result.message}`)
   }
 }
 </script>

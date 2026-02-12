@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useProviderStore } from '@/stores/provider'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -40,14 +41,23 @@ const router = createRouter({
   ]
 })
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
+  const providerStore = useProviderStore()
 
   if (to.meta.requiresAuth !== false && !authStore.isLoggedIn) {
     next({ name: 'Login', query: { redirect: to.fullPath } })
   } else if (to.name === 'Login' && authStore.isLoggedIn) {
     next({ name: 'Dashboard' })
   } else {
+    // Initialize provider store when accessing protected routes
+    if (authStore.isLoggedIn && providerStore.providers.length === 0) {
+      try {
+        await providerStore.init()
+      } catch (e) {
+        console.error('Failed to initialize provider store:', e)
+      }
+    }
     next()
   }
 })
