@@ -1,0 +1,54 @@
+server:
+  port: 0  # Auto-select available port
+
+spring:
+  application:
+    name: paiswitch-backend
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/paiswitch?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8
+    username: root
+    password: ${DB_PASSWORD:123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+  ai:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
+      base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
+
+jwt:
+  secret: ${JWT_SECRET:paiswitch-jwt-secret-key-must-be-at-least-256-bits-long-for-hs256}
+  expiration: 86400000
+
+encryption:
+  aes-key: ${AES_ENCRYPTION_KEY:paiswitch-aes-32-characters-key}
+
+logging:
+  level:
+    com.paicoding.paiswitch: DEBUG
+    org.springframework.ai: DEBUG
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
