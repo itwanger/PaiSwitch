@@ -2,18 +2,119 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject var viewModel: MainViewModel
+    @StateObject private var authManager = AuthManager.shared
     @State private var selectedProvider: ModelProvider?
     @State private var selectedCustomProvider: CustomProviderConfiguration?
     @State private var showingAPIKeyInput = false
     @State private var inputAPIKey = ""
+    @State private var showLoginSheet = false
+    @State private var showAIChat = false
 
     var body: some View {
         NavigationSplitView {
-            ProviderListView(
-                viewModel: viewModel,
-                selectedProvider: $selectedProvider,
-                selectedCustomProvider: $selectedCustomProvider
-            )
+            List {
+                // Online Status Section
+                Section {
+                    if authManager.isLoggedIn {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            VStack(alignment: .leading) {
+                                Text("在线模式")
+                                    .font(.subheadline)
+                                Text(authManager.currentUser?.username ?? "用户")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Button("退出") {
+                                authManager.logout()
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.red)
+                        }
+                    } else {
+                        Button {
+                            showLoginSheet = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "person.badge.key")
+                                Text("登录以启用在线功能")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("账户")
+                }
+
+                // AI Chat Section (online only)
+                if authManager.isLoggedIn {
+                    Section {
+                        Button {
+                            showAIChat = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                                    .foregroundColor(.accentColor)
+                                Text("AI 助手")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } header: {
+                        Text("AI 功能")
+                    }
+                }
+
+                // Providers Section
+                Section {
+                    ForEach(ModelProvider.allCases, id: \.self) { provider in
+                        ProviderRow(
+                            provider: provider,
+                            isSelected: viewModel.currentProvider == provider,
+                            hasAPIKey: viewModel.hasAPIKey(for: provider)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectedProvider = provider
+                            selectedCustomProvider = nil
+                        }
+                    }
+                } header: {
+                    Text("内置提供商")
+                }
+
+                // Custom Providers Section
+                let customProviders = CustomProviderManager.shared.getAllProviders()
+                if !customProviders.isEmpty {
+                    Section {
+                        ForEach(customProviders) { provider in
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(provider.name)
+                                    Text(provider.baseURL)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                if viewModel.currentProvider == .custom {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.accentColor)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedCustomProvider = provider
+                                selectedProvider = nil
+                            }
+                        }
+                    } header: {
+                        Text("自定义提供商")
+                    }
+                }
+            }
             .frame(minWidth: 200)
         } detail: {
             if let customProvider = selectedCustomProvider {
@@ -34,12 +135,18 @@ struct ContentView: View {
                     }
                 )
             } else {
-                WelcomeView(currentProvider: viewModel.currentProvider)
+                WelcomeView(
+                    currentProvider: viewModel.currentProvider,
+                    isOnline: authManager.isLoggedIn
+                )
             }
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Button(action: { viewModel.loadCurrentConfig() }) {
+                Button(action: {
+                    viewModel.loadCurrentConfig()
+                    Task { await viewModel.loadRemoteData() }
+                }) {
                     Label("刷新", systemImage: "arrow.clockwise")
                 }
             }
@@ -49,6 +156,14 @@ struct ContentView: View {
                     Label("历史记录", systemImage: "clock.arrow.circlepath")
                 }
             }
+        }
+        .sheet(isPresented: $showLoginSheet) {
+            LoginView()
+                .frame(width: 400)
+        }
+        .sheet(isPresented: $showAIChat) {
+            AIChatView()
+                .frame(width: 500, height: 600)
         }
         .overlay(alignment: .top) {
             if let message = viewModel.successMessage {
@@ -70,8 +185,36 @@ struct ContentView: View {
     }
 }
 
+struct ProviderRow: View {
+    let provider: ModelProvider
+    let isSelected: Bool
+    let hasAPIKey: Bool
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text(provider.displayName)
+                Text(provider.defaultModel)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .foregroundColor(.accentColor)
+            }
+            if hasAPIKey {
+                Image(systemName: "key.fill")
+                    .foregroundColor(.green)
+                    .font(.caption)
+            }
+        }
+    }
+}
+
 struct WelcomeView: View {
     let currentProvider: ModelProvider
+    let isOnline: Bool
 
     var body: some View {
         VStack(spacing: 20) {
@@ -87,9 +230,15 @@ struct WelcomeView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            Text("从左侧选择服务商进行切换")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
+            if isOnline {
+                Label("在线模式已启用", systemImage: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                    .font(.subheadline)
+            } else {
+                Text("从左侧选择服务商进行切换")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -145,4 +294,9 @@ struct ToastView: View {
             }
         }
     }
+}
+
+#Preview {
+    ContentView(viewModel: MainViewModel())
+        .frame(width: 800, height: 600)
 }

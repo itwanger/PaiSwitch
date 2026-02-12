@@ -26,8 +26,66 @@ class KeychainManager {
 
     private let service = "com.paicoding.paiswitch.apikey"
     private let customServicePrefix = "com.paicoding.paiswitch.custom."
+    private let tokenService = "com.paicoding.paiswitch.token"
+    private let tokenAccount = "api_token"
 
     private init() {}
+
+    // MARK: - API Token
+
+    func saveAPIToken(_ token: String) throws {
+        try? deleteAPIToken()
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: tokenService,
+            kSecAttrAccount as String: tokenAccount,
+            kSecValueData as String: token.data(using: .utf8)!,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+
+        let status = SecItemAdd(query as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    func getAPIToken() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: tokenService,
+            kSecAttrAccount as String: tokenAccount,
+            kSecReturnData as String: true
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let token = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        return token
+    }
+
+    func deleteAPIToken() throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: tokenService,
+            kSecAttrAccount as String: tokenAccount
+        ]
+
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    func hasAPIToken() -> Bool {
+        return getAPIToken() != nil
+    }
 
     func saveAPIKey(_ key: String, for provider: ModelProvider) throws {
         let account = provider.rawValue

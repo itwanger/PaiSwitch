@@ -36,6 +36,10 @@ mvn spring-boot:run
 
 启动成功后访问：http://localhost:8080/swagger-ui.html
 
+**默认账号：**
+- 用户名：`admin`
+- 密码：`admin123`
+
 ---
 
 ### 方式二：Docker 部署
