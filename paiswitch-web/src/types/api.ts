@@ -107,3 +107,14 @@ export interface NaturalLanguageResponse {
   switchResult?: SwitchResult
   sessionId: string
 }
+
+export interface ConversationMessage {
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
+}
+
+export interface ConversationHistoryResponse {
+  sessionId?: string | null
+  messages: ConversationMessage[]
+}

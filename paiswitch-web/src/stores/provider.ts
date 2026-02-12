@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { providerApi, apiKeyApi, configApi, switchApi } from '@/api'
-import type { ProviderInfo, ApiKeyInfo, ApiKeyPlainInfo, ConfigInfo, SwitchResult, ProviderConfigUpdateRequest, ProviderTestRequest, ProviderTestResult } from '@/types'
+import type { ProviderInfo, ApiKeyInfo, ApiKeyPlainInfo, ConfigInfo, SwitchResult, ProviderConfigUpdateRequest, ProviderTestRequest, ProviderTestResult, ConversationHistoryResponse } from '@/types'
 
 export const useProviderStore = defineStore('provider', () => {
   const providers = ref<ProviderInfo[]>([])
@@ -54,6 +54,14 @@ export const useProviderStore = defineStore('provider', () => {
     return switchApi.naturalLanguageSwitch(prompt, sessionId)
   }
 
+  async function getLatestConversation(): Promise<ConversationHistoryResponse> {
+    return switchApi.getLatestConversation()
+  }
+
+  async function getConversationBySessionId(sessionId: string): Promise<ConversationHistoryResponse> {
+    return switchApi.getConversationBySessionId(sessionId)
+  }
+
   async function updateProviderConfig(providerCode: string, config: ProviderConfigUpdateRequest) {
     const result = await providerApi.updateConfig(providerCode, config)
     await fetchProviders()
@@ -81,6 +89,8 @@ export const useProviderStore = defineStore('provider', () => {
     getApiKeyPlain,
     switchProvider,
     naturalLanguageSwitch,
+    getLatestConversation,
+    getConversationBySessionId,
     updateProviderConfig,
     testProviderConnection,
     init

@@ -40,6 +40,23 @@ public class AiController {
         return ApiResponse.success(aiChatService.processNaturalLanguage(userId, request));
     }
 
+    @Operation(summary = "Get latest AI conversation")
+    @GetMapping("/conversations/latest")
+    public ApiResponse<SwitchDto.ConversationHistoryResponse> getLatestConversation(
+            @RequestHeader("Authorization") String authorization) {
+        Long userId = extractUserId(authorization);
+        return ApiResponse.success(aiChatService.getLatestConversation(userId));
+    }
+
+    @Operation(summary = "Get AI conversation by session ID")
+    @GetMapping("/conversations/{sessionId}")
+    public ApiResponse<SwitchDto.ConversationHistoryResponse> getConversationBySessionId(
+            @RequestHeader("Authorization") String authorization,
+            @PathVariable String sessionId) {
+        Long userId = extractUserId(authorization);
+        return ApiResponse.success(aiChatService.getConversationHistory(userId, sessionId));
+    }
+
     private Long extractUserId(String authorization) {
         String token = authorization.replace("Bearer ", "");
         return jwtTokenProvider.getUserIdFromToken(token);

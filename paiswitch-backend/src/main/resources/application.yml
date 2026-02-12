@@ -5,6 +5,12 @@ spring:
   application:
     name: paiswitch-backend
 
+  devtools:
+    restart:
+      enabled: true
+    livereload:
+      enabled: true
+
   datasource:
     url: jdbc:mysql://localhost:3306/paiswitch?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=utf8
     username: root

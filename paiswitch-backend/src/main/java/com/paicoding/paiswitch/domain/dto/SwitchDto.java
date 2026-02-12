@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
 import java.time.LocalDateTime;
 
 public class SwitchDto {
@@ -54,5 +55,24 @@ public class SwitchDto {
         private Boolean switchTriggered;
         private SwitchResult switchResult;
         private String sessionId;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ConversationMessage {
+        private String role;
+        private String content;
+        private LocalDateTime createdAt;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class ConversationHistoryResponse {
+        private String sessionId;
+        private List<ConversationMessage> messages;
     }
 }

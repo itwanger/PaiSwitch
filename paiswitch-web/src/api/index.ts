@@ -9,6 +9,7 @@ import type {
   BackupInfo,
   SwitchResult,
   NaturalLanguageResponse,
+  ConversationHistoryResponse,
   ProviderConfigUpdateRequest,
   ProviderTestRequest,
   ProviderTestResult
@@ -88,5 +89,11 @@ export const switchApi = {
     apiPost<NaturalLanguageResponse>('/ai/switch-by-nl', { prompt, sessionId, clientInfo }),
 
   chat: (prompt: string, sessionId?: string) =>
-    apiPost<NaturalLanguageResponse>('/ai/chat', { prompt, sessionId })
+    apiPost<NaturalLanguageResponse>('/ai/chat', { prompt, sessionId }),
+
+  getLatestConversation: () =>
+    apiGet<ConversationHistoryResponse>('/ai/conversations/latest'),
+
+  getConversationBySessionId: (sessionId: string) =>
+    apiGet<ConversationHistoryResponse>(`/ai/conversations/${encodeURIComponent(sessionId)}`)
 }
