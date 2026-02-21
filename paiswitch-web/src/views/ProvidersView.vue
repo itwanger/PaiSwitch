@@ -2,17 +2,19 @@
 import { ref } from 'vue'
 import { useProviderStore } from '@/stores/provider'
 import { useToastStore } from '@/stores/toast'
-import type { ProviderInfo, ProviderConfigUpdateRequest } from '@/types'
+import type { ProviderInfo, ProviderConfigUpdateRequest, CustomProviderCreateRequest } from '@/types'
 
 const providerStore = useProviderStore()
 const toastStore = useToastStore()
 
 const showConfigModal = ref(false)
+const showCreateModal = ref(false)
 const selectedProvider = ref<ProviderInfo | null>(null)
 const configApiKey = ref('')
 const showApiKey = ref(false)
 const loadingApiKey = ref(false)
 const saving = ref(false)
+const creatingCustom = ref(false)
 const testing = ref(false)
 const testResult = ref<{ success: boolean; message: string; responseTimeMs?: number } | null>(null)
 const originalApiKey = ref('')
@@ -29,8 +31,84 @@ const configForm = ref({
   modelNameSmall: ''
 })
 
+const customForm = ref({
+  name: '',
+  code: '',
+  description: '',
+  baseUrl: '',
+  modelName: '',
+  modelNameSmall: ''
+})
+const createApiKey = ref('')
+const showCreateApiKey = ref(false)
+
 function normalizeInput(value?: string | null): string {
   return (value || '').trim()
+}
+
+function toProviderCode(value: string): string {
+  const normalized = value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+  if (!normalized) {
+    return `custom-${Date.now()}`
+  }
+  return normalized.slice(0, 50)
+}
+
+function openCreateModal() {
+  customForm.value = {
+    name: '',
+    code: '',
+    description: '',
+    baseUrl: '',
+    modelName: '',
+    modelNameSmall: ''
+  }
+  createApiKey.value = ''
+  showCreateApiKey.value = false
+  showCreateModal.value = true
+}
+
+async function createCustomProvider() {
+  const name = normalizeInput(customForm.value.name)
+  const baseUrl = normalizeInput(customForm.value.baseUrl)
+  const modelName = normalizeInput(customForm.value.modelName)
+  const code = toProviderCode(normalizeInput(customForm.value.code) || name)
+
+  if (!name || !baseUrl || !modelName) {
+    toastStore.error('请填写名称、Base URL 和模型名称')
+    return
+  }
+
+  if (providerStore.providers.some((provider) => provider.code === code)) {
+    toastStore.error(`模型编码 ${code} 已存在，请修改后重试`)
+    return
+  }
+
+  creatingCustom.value = true
+  try {
+    const payload: CustomProviderCreateRequest = {
+      code,
+      name,
+      description: normalizeInput(customForm.value.description) || undefined,
+      baseUrl,
+      modelName,
+      modelNameSmall: normalizeInput(customForm.value.modelNameSmall) || undefined
+    }
+
+    await providerStore.createCustomProvider(payload, normalizeInput(createApiKey.value) || undefined)
+    showCreateModal.value = false
+    toastStore.success(`已新增自定义模型 ${name}`)
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { message?: string } } }
+    toastStore.error(err.response?.data?.message || '新增失败，请重试')
+  } finally {
+    creatingCustom.value = false
+  }
 }
 
 async function openConfigModal(provider: ProviderInfo) {
@@ -176,7 +254,15 @@ async function deleteKey(providerCode: string) {
 
 <template>
   <div>
-    <h2 class="text-2xl font-bold text-gray-900 mb-6">模型管理</h2>
+    <div class="flex items-center justify-between mb-6">
+      <h2 class="text-2xl font-bold text-gray-900">模型管理</h2>
+      <button
+        @click="openCreateModal"
+        class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-colors"
+      >
+        新增自定义模型
+      </button>
+    </div>
 
     <!-- Providers Grid -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -210,6 +296,12 @@ async function deleteKey(providerCode: string) {
           >
             内置
           </span>
+          <span
+            v-else
+            class="px-2 py-1 bg-amber-100 text-amber-700 text-xs rounded-full"
+          >
+            自定义
+          </span>
         </div>
 
         <div class="space-y-2 text-sm mb-4">
@@ -241,6 +333,120 @@ async function deleteKey(providerCode: string) {
             class="px-3 py-2 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors"
           >
             删除
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create Custom Provider Modal -->
+    <div
+      v-if="showCreateModal"
+      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      @click.self="showCreateModal = false"
+    >
+      <div class="bg-white rounded-xl p-6 w-full max-w-md">
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">新增自定义模型</h3>
+
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">名称</label>
+            <input
+              v-model="customForm.name"
+              type="text"
+              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              placeholder="例如: Qwen 3.5 Plus"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">编码 (可选)</label>
+            <input
+              v-model="customForm.code"
+              type="text"
+              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              placeholder="留空自动生成，例如 qwen-3-5-plus"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Base URL</label>
+            <input
+              v-model="customForm.baseUrl"
+              type="text"
+              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              placeholder="例如: https://dashscope.aliyuncs.com/compatible-mode/v1"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">模型名称</label>
+            <input
+              v-model="customForm.modelName"
+              type="text"
+              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              placeholder="例如: qwen-plus"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">小模型名称 (可选)</label>
+            <input
+              v-model="customForm.modelNameSmall"
+              type="text"
+              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              placeholder="例如: qwen-turbo"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">说明 (可选)</label>
+            <input
+              v-model="customForm.description"
+              type="text"
+              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              placeholder="例如: Qwen compatible endpoint"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">API Key (可选)</label>
+            <div class="flex items-center gap-2">
+              <input
+                v-model="createApiKey"
+                :type="showCreateApiKey ? 'text' : 'password'"
+                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                placeholder="可选，创建后会自动保存"
+              />
+              <button
+                type="button"
+                @click="showCreateApiKey = !showCreateApiKey"
+                :disabled="!createApiKey"
+                class="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50 transition-colors"
+                :title="showCreateApiKey ? '隐藏 API Key' : '显示 API Key'"
+              >
+                {{ showCreateApiKey ? '隐藏' : '👀' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <p class="mt-4 text-xs text-gray-500">
+          提示：编码仅支持小写字母、数字和中划线；留空会根据名称自动生成
+        </p>
+
+        <div class="flex justify-end gap-3 mt-6">
+          <button
+            @click="showCreateModal = false"
+            class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            取消
+          </button>
+          <button
+            @click="createCustomProvider"
+            :disabled="creatingCustom"
+            class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg disabled:opacity-50 transition-colors"
+          >
+            {{ creatingCustom ? '创建中...' : '确认新增' }}
           </button>
         </div>
       </div>

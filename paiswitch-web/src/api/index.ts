@@ -11,6 +11,7 @@ import type {
   NaturalLanguageResponse,
   ConversationHistoryResponse,
   ProviderConfigUpdateRequest,
+  CustomProviderCreateRequest,
   ProviderTestRequest,
   ProviderTestResult
 } from '@/types'
@@ -32,15 +33,8 @@ export const providerApi = {
 
   getByCode: (code: string) => apiGet<ProviderInfo>(`/providers/${code}`),
 
-  createCustom: (data: {
-    code: string
-    name: string
-    description?: string
-    baseUrl: string
-    modelName: string
-    modelNameSmall?: string
-    iconUrl?: string
-  }) => apiPost<ProviderInfo>('/providers/custom', data),
+  createCustom: (data: CustomProviderCreateRequest) =>
+    apiPost<ProviderInfo>('/providers/custom', data),
 
   update: (code: string, data: Partial<ProviderInfo>) =>
     apiPut<ProviderInfo>(`/providers/${code}`, data),

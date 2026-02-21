@@ -43,6 +43,16 @@ export interface ProviderConfigUpdateRequest {
   modelNameSmall?: string
 }
 
+export interface CustomProviderCreateRequest {
+  code: string
+  name: string
+  description?: string
+  baseUrl: string
+  modelName: string
+  modelNameSmall?: string
+  iconUrl?: string
+}
+
 export interface ProviderTestRequest {
   baseUrl?: string
   modelName?: string

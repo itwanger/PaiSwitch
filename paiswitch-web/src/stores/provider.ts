@@ -1,7 +1,18 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { providerApi, apiKeyApi, configApi, switchApi } from '@/api'
-import type { ProviderInfo, ApiKeyInfo, ApiKeyPlainInfo, ConfigInfo, SwitchResult, ProviderConfigUpdateRequest, ProviderTestRequest, ProviderTestResult, ConversationHistoryResponse } from '@/types'
+import type {
+  ProviderInfo,
+  ApiKeyInfo,
+  ApiKeyPlainInfo,
+  ConfigInfo,
+  SwitchResult,
+  ProviderConfigUpdateRequest,
+  ProviderTestRequest,
+  ProviderTestResult,
+  ConversationHistoryResponse,
+  CustomProviderCreateRequest
+} from '@/types'
 
 export const useProviderStore = defineStore('provider', () => {
   const providers = ref<ProviderInfo[]>([])
@@ -68,6 +79,15 @@ export const useProviderStore = defineStore('provider', () => {
     return result
   }
 
+  async function createCustomProvider(data: CustomProviderCreateRequest, apiKey?: string) {
+    const provider = await providerApi.createCustom(data)
+    if (apiKey && apiKey.trim()) {
+      await apiKeyApi.set(provider.code, apiKey.trim())
+    }
+    await Promise.all([fetchProviders(), fetchApiKeys()])
+    return provider
+  }
+
   async function testProviderConnection(providerCode: string, testConfig?: ProviderTestRequest): Promise<ProviderTestResult> {
     return providerApi.testConnection(providerCode, testConfig)
   }
@@ -92,6 +112,7 @@ export const useProviderStore = defineStore('provider', () => {
     getLatestConversation,
     getConversationBySessionId,
     updateProviderConfig,
+    createCustomProvider,
     testProviderConnection,
     init
   }
