@@ -39,7 +39,8 @@ public class ProviderService {
     private enum ProviderApiStyle {
         OPENROUTER,
         ANTHROPIC,
-        OPENAI
+        OPENAI,
+        RESPONSES
     }
 
     private final ModelProviderRepository providerRepository;
@@ -128,6 +129,40 @@ public class ProviderService {
         provider = providerRepository.save(provider);
         log.info("Updated provider: {} ({}) by user: {}", provider.getCode(), tool, userId);
         return mapToProviderInfo(provider);
+    }
+
+    /**
+     * Delete a custom provider. Built-in providers cannot be removed, and a
+     * provider that is currently active for the user must be switched away first.
+     * <p>
+     * Implemented as a soft delete ({@code is_active = false}) so existing
+     * {@code switch_history} references stay intact; the provider simply drops out
+     * of every list (all queries filter on {@code is_active = true}). The stored
+     * API key is removed so no orphaned secret lingers.
+     */
+    @Transactional
+    public void deleteCustomProvider(Long userId, String code, TargetTool tool) {
+        ModelProvider provider = providerRepository.findByCodeAndTargetTool(code, tool)
+                .orElseThrow(() -> new BusinessException(ResponseCode.PROVIDER_NOT_FOUND));
+
+        if (Boolean.TRUE.equals(provider.getIsBuiltin())) {
+            throw new BusinessException(ResponseCode.FORBIDDEN, "无法删除内置供应商");
+        }
+
+        configRepository.findByUserId(userId).ifPresent(config -> {
+            boolean isCurrentClaude = config.getCurrentProvider() != null
+                    && provider.getId().equals(config.getCurrentProvider().getId());
+            boolean isCurrentCodex = config.getCurrentCodexProvider() != null
+                    && provider.getId().equals(config.getCurrentCodexProvider().getId());
+            if (isCurrentClaude || isCurrentCodex) {
+                throw new BusinessException(ResponseCode.CONFLICT, "该供应商正在使用中，请先切换到其他模型再删除");
+            }
+        });
+
+        apiKeyRepository.deleteByUserIdAndProviderId(userId, provider.getId());
+        provider.setIsActive(false);
+        providerRepository.save(provider);
+        log.info("Deleted custom provider: {} ({}) by user: {}", code, tool, userId);
     }
 
     /**
@@ -250,11 +285,13 @@ public class ProviderService {
             testUrl = switch (apiStyle) {
                 case OPENROUTER, OPENAI -> buildChatCompletionsUrl(upstreamBaseUrl);
                 case ANTHROPIC -> buildMessagesTestUrl(upstreamBaseUrl);
+                case RESPONSES -> buildResponsesTestUrl(upstreamBaseUrl);
             };
             String requestBody = switch (apiStyle) {
                 case OPENROUTER -> buildOpenRouterTestRequestBody(modelName);
                 case OPENAI -> buildOpenAiCompatibleTestRequestBody(modelName);
                 case ANTHROPIC -> buildAnthropicTestRequestBody(modelName);
+                case RESPONSES -> buildResponsesTestRequestBody(modelName);
             };
 
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
@@ -265,7 +302,7 @@ public class ProviderService {
             upstreamConfig.headers().forEach(requestBuilder::header);
 
             switch (apiStyle) {
-                case OPENROUTER, OPENAI ->
+                case OPENROUTER, OPENAI, RESPONSES ->
                         requestBuilder.header("Authorization", "Bearer " + normalizedApiKey);
                 case ANTHROPIC ->
                         requestBuilder
@@ -384,6 +421,13 @@ public class ProviderService {
         if (isOpenRouterProvider(providerCode, normalizedUrl)) {
             return ProviderApiStyle.OPENROUTER;
         }
+        // Codex providers that natively speak the Responses API (e.g. StepFun) must
+        // be tested against /responses, not /chat/completions — otherwise the test
+        // silently exercises the wrong endpoint and tells us nothing about the path
+        // Codex actually uses.
+        if (tool == TargetTool.CODEX && speaksResponsesNatively(provider)) {
+            return ProviderApiStyle.RESPONSES;
+        }
         if (tool == TargetTool.CLAUDE_CODE && isOpenAiWireProvider(provider)) {
             return ProviderApiStyle.OPENAI;
         }
@@ -402,6 +446,11 @@ public class ProviderService {
             return ProviderApiStyle.ANTHROPIC;
         }
         return ProviderApiStyle.OPENAI;
+    }
+
+    private boolean speaksResponsesNatively(ModelProvider provider) {
+        String wireApi = provider.getWireApi();
+        return wireApi != null && "responses".equalsIgnoreCase(wireApi.trim());
     }
 
     private boolean isOpenAiWireProvider(ModelProvider provider) {
@@ -442,6 +491,26 @@ public class ProviderService {
             return normalizedUrl + "/chat/completions";
         }
         return normalizedUrl + "/v1/chat/completions";
+    }
+
+    private String buildResponsesTestUrl(String normalizedUrl) {
+        if (normalizedUrl.endsWith("/responses")) {
+            return normalizedUrl;
+        }
+        if (normalizedUrl.endsWith("/v1") || normalizedUrl.endsWith("/v2") || normalizedUrl.endsWith("/api/v3")) {
+            return normalizedUrl + "/responses";
+        }
+        return normalizedUrl + "/v1/responses";
+    }
+
+    private String buildResponsesTestRequestBody(String modelName) {
+        return """
+            {
+                "model": "%s",
+                "input": "Hi",
+                "max_output_tokens": 16
+            }
+            """.formatted(modelName);
     }
 
     private String buildOpenAiCompatibleTestRequestBody(String modelName) {
@@ -534,6 +603,15 @@ public class ProviderService {
                             .responseTimeMs(responseTime)
                             .build();
                 }
+            } else if (apiStyle == ProviderApiStyle.RESPONSES) {
+                String responsesError = validateResponsesBody(response.body());
+                if (responsesError != null) {
+                    return ProviderDto.TestResult.builder()
+                            .success(false)
+                            .message(responsesError)
+                            .responseTimeMs(responseTime)
+                            .build();
+                }
             } else {
                 // OpenAI-compatible upstreams: some providers (apifree.ai / SkyClaw)
                 // wrap errors in HTTP 200 with a body-level `error` object. Without
@@ -622,6 +700,38 @@ public class ProviderService {
             return ChatResponseValidator.describeBodyLevelError(root);
         } catch (Exception e) {
             return "响应不是合法 JSON：" + e.getMessage();
+        }
+    }
+
+    /**
+     * Validates a Responses API reply. Returns null when the body looks like a
+     * usable {@code response} object, otherwise a human-readable failure message.
+     * A native Responses endpoint returns a top-level {@code object}/{@code output}
+     * (and never a chat-completions {@code choices} array); a wrong path typically
+     * shows up as a top-level {@code error} object instead.
+     */
+    private String validateResponsesBody(String body) {
+        if (body == null || body.isBlank()) {
+            return "响应体为空，无法确认是否支持 /responses";
+        }
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(body);
+            com.fasterxml.jackson.databind.JsonNode error = root.get("error");
+            if (error != null && !error.isNull()) {
+                String message = error.isObject() ? error.path("message").asText("") : error.asText("");
+                return "供应商 /responses 返回错误" + (message.isBlank() ? "" : ": " + message);
+            }
+            boolean looksLikeResponses = root.has("output")
+                    || root.has("output_text")
+                    || "response".equals(root.path("object").asText(""))
+                    || root.has("status");
+            if (!looksLikeResponses) {
+                return "响应不像 Responses API（缺少 output/status），该端点可能不支持 /responses";
+            }
+            return null;
+        } catch (Exception e) {
+            return "/responses 返回的不是合法 JSON：" + e.getMessage();
         }
     }
 

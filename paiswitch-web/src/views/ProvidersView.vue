@@ -252,6 +252,18 @@ async function deleteKey(providerCode: string) {
     }
   }
 }
+
+async function deleteProvider(provider: ProviderInfo) {
+  if (confirm(`确定要删除自定义模型「${provider.name}」吗？此操作不可恢复。`)) {
+    try {
+      await providerStore.deleteProvider(provider.code)
+      toastStore.success(`已删除 ${provider.name}`)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } }
+      toastStore.error(err.response?.data?.message || '删除失败，请重试')
+    }
+  }
+}
 </script>
 
 <template>
@@ -356,7 +368,15 @@ async function deleteKey(providerCode: string) {
             @click="deleteKey(provider.code)"
             class="px-4 py-2.5 text-sm border border-red-200 hover:bg-red-50 text-red-600 rounded-xl transition-colors"
           >
-            删除
+            删除密钥
+          </button>
+          <button
+            v-if="!provider.isBuiltin"
+            @click="deleteProvider(provider)"
+            class="px-4 py-2.5 text-sm border border-red-300 hover:bg-red-600 hover:text-white text-red-700 rounded-xl transition-colors"
+            title="删除此自定义模型"
+          >
+            删除模型
           </button>
         </div>
       </div>

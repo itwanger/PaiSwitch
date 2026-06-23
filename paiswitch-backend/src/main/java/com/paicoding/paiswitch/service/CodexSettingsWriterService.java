@@ -26,12 +26,17 @@ import java.util.Optional;
  * <ul>
  *   <li><b>OpenAI Official</b> — minimal config, relies on Codex's built-in OpenAI
  *       provider and the existing OAuth login (or PaiSwitch-stored OPENAI_API_KEY).</li>
- *   <li><b>Third-party (DeepSeek / Kimi / Zhipu / Bailian)</b> — Codex CLI ≥ 0.55
- *       only accepts {@code wire_api = "responses"}. Since these providers speak
- *       chat-completions, we point {@code base_url} at PaiSwitch's local proxy
- *       (controlled by {@code paiswitch.codex.proxy.base-url}, default
+ *   <li><b>Native Responses (e.g. StepFun)</b> — providers whose
+ *       {@code wire_api = "responses"} already speak the Responses API natively, so
+ *       {@code base_url} points straight at their real endpoint and the proxy is
+ *       bypassed entirely.</li>
+ *   <li><b>Third-party chat-completions (DeepSeek / Kimi / Zhipu / Bailian)</b> —
+ *       Codex CLI ≥ 0.55 only accepts {@code wire_api = "responses"}. Since these
+ *       providers speak chat-completions, we point {@code base_url} at PaiSwitch's
+ *       local proxy (controlled by {@code paiswitch.codex.proxy.base-url}, default
  *       {@code http://127.0.0.1:8086}); the proxy does Responses ↔ chat translation.</li>
- *   <li><b>Custom user-created</b> — same proxy path as third-party.</li>
+ *   <li><b>Custom user-created</b> — native or proxied depending on its
+ *       {@code wire_api}.</li>
  * </ul>
  * Example for DeepSeek:
  * <pre>
@@ -197,10 +202,16 @@ public class CodexSettingsWriterService {
         String model = provider.getModelName() == null ? "" : provider.getModelName();
         String displayName = provider.getName() == null ? providerKey : provider.getName();
 
-        // Codex CLI ≥ 0.55 only accepts wire_api = "responses". Third-party providers
-        // (DeepSeek / Kimi / ...) speak chat-completions, so we route Codex through
-        // the local PaiSwitch proxy which does the Responses ↔ chat translation.
-        String proxyUrl = proxyEndpointResolver.getProxyBaseUrl() + "/codex-proxy/" + provider.getCode() + "/v1";
+        // Codex CLI ≥ 0.55 only accepts wire_api = "responses".
+        //   - Providers that natively speak the Responses API (wire_api = "responses",
+        //     e.g. StepFun) are pointed straight at their real base_url; no proxy.
+        //   - Providers that only speak chat-completions (DeepSeek / Kimi / ...) are
+        //     routed through the local PaiSwitch proxy which does the Responses ↔ chat
+        //     translation.
+        // Either way Codex sees wire_api = "responses".
+        String baseUrl = speaksResponsesNatively(provider)
+                ? trimTrailingSlash(provider.getBaseUrl())
+                : proxyEndpointResolver.getProxyBaseUrl() + "/codex-proxy/" + provider.getCode() + "/v1";
 
         String providerBlock = """
                 [model_providers.%s]
@@ -208,7 +219,7 @@ public class CodexSettingsWriterService {
                 base_url = %s
                 wire_api = "responses"
                 requires_openai_auth = true
-                """.formatted(providerKey, tomlString(displayName), tomlString(proxyUrl));
+                """.formatted(providerKey, tomlString(displayName), tomlString(baseUrl));
 
         backupIfExists(path);
         Files.writeString(path, updateConfigToml(path, List.of(
@@ -344,6 +355,23 @@ public class CodexSettingsWriterService {
     }
 
     private record TomlParts(List<String> topLevelLines, String body) {}
+
+    /**
+     * True when the upstream natively speaks the Responses API
+     * ({@code wire_api = "responses"}), so Codex can call it directly without the
+     * local Responses ↔ chat translation proxy.
+     */
+    private boolean speaksResponsesNatively(ModelProvider provider) {
+        String wireApi = provider.getWireApi();
+        return wireApi != null && "responses".equalsIgnoreCase(wireApi.trim());
+    }
+
+    private static String trimTrailingSlash(String url) {
+        if (url == null) {
+            return "";
+        }
+        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+    }
 
     private String tomlString(String value) {
         if (value == null) return "\"\"";

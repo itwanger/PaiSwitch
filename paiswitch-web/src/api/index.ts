@@ -54,7 +54,10 @@ export const providerApi = {
     apiPut<ProviderInfo>(`/providers/${code}/config${toolQuery(tool)}`, data),
 
   testConnection: (code: string, tool: TargetTool, data?: ProviderTestRequest) =>
-    apiPost<ProviderTestResult>(`/providers/${code}/test${toolQuery(tool)}`, data || {})
+    apiPost<ProviderTestResult>(`/providers/${code}/test${toolQuery(tool)}`, data || {}),
+
+  delete: (code: string, tool: TargetTool) =>
+    apiDelete<void>(`/providers/${code}${toolQuery(tool)}`)
 }
 
 // API Key API

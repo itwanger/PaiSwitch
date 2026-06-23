@@ -114,6 +114,11 @@ export const useProviderStore = defineStore('provider', () => {
     return providerApi.testConnection(providerCode, activeTool.value, testConfig)
   }
 
+  async function deleteProvider(providerCode: string) {
+    await providerApi.delete(providerCode, activeTool.value)
+    await Promise.all([fetchProviders(), fetchApiKeys()])
+  }
+
   async function init() {
     await Promise.all([fetchProviders(), fetchApiKeys(), fetchConfig()])
   }
@@ -138,6 +143,7 @@ export const useProviderStore = defineStore('provider', () => {
     updateProviderConfig,
     createCustomProvider,
     testProviderConnection,
+    deleteProvider,
     init
   }
 })

@@ -124,6 +124,17 @@ public class DefaultUserInitializer implements CommandLineRunner {
                 "chat",
                 "xfyun_maas",
                 7);
+        // StepFun natively speaks the Responses API, so Codex connects directly to
+        // the real base_url (no local proxy). The settings writer treats
+        // wire_api='responses' as a native passthrough.
+        createCodexBuiltinProviderIfMissing("stepfun", "StepFun (阶跃星辰)",
+                "阶跃 Step 模型,原生 Responses API,Codex 直连无需代理",
+                "https://api.stepfun.com/v1",
+                "step-3.7-flash",
+                null,
+                "responses",
+                "stepfun",
+                8);
         // Claude Code side: SkyClaw only exposes OpenAI chat-completions. base_url
         // points at the upstream; wire_api='openai' makes the settings writer route
         // ANTHROPIC_BASE_URL through the local /claude-proxy/{code} translator so

@@ -1,0 +1,7 @@
+interface:
+  display_name: "StepFun 生图"
+  short_description: "通过 StepFun 图片接口生成技术配图"
+  default_prompt: "Use $step-image to generate a StepFun image for my article."
+
+policy:
+  allow_implicit_invocation: true

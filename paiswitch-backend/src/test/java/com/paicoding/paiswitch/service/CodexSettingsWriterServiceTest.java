@@ -100,6 +100,50 @@ class CodexSettingsWriterServiceTest {
     }
 
     @Test
+    void shouldPointDirectlyAtUpstreamForNativeResponsesProvider() throws Exception {
+        Path authPath = tempDir.resolve("auth.json");
+        Path configPath = tempDir.resolve("config.toml");
+        System.setProperty(AUTH_PATH_PROPERTY, authPath.toString());
+        System.setProperty(CONFIG_PATH_PROPERTY, configPath.toString());
+
+        ApiKeyRepository apiKeyRepository = mock(ApiKeyRepository.class);
+        EncryptionService encryptionService = mock(EncryptionService.class);
+        ProxyEndpointResolver proxyEndpointResolver = mock(ProxyEndpointResolver.class);
+        CodexSettingsWriterService service = new CodexSettingsWriterService(
+                apiKeyRepository,
+                encryptionService,
+                proxyEndpointResolver
+        );
+        ModelProvider provider = ModelProvider.builder()
+                .id(30L)
+                .code("stepfun")
+                .name("StepFun (阶跃星辰)")
+                .baseUrl("https://api.stepfun.com/v1")
+                .modelName("step-3.7-flash")
+                .wireApi("responses")
+                .providerKey("stepfun")
+                .isBuiltin(true)
+                .build();
+        ApiKey apiKey = ApiKey.builder().encryptedKey("encrypted").build();
+
+        when(apiKeyRepository.findByUserIdAndProviderId(1L, 30L)).thenReturn(Optional.of(apiKey));
+        when(encryptionService.decrypt("encrypted")).thenReturn("sk-step");
+
+        service.writeToSettings(1L, provider);
+
+        String toml = Files.readString(configPath);
+        assertTrue(toml.contains("model_provider = \"stepfun\""));
+        assertTrue(toml.contains("model = \"step-3.7-flash\""));
+        assertTrue(toml.contains("base_url = \"https://api.stepfun.com/v1\""));
+        assertTrue(toml.contains("wire_api = \"responses\""));
+        // Native responses provider must NOT be routed through the local proxy.
+        assertFalse(toml.contains("/codex-proxy/"));
+
+        JsonNode auth = objectMapper.readTree(Files.readString(authPath));
+        assertTrue("sk-step".equals(auth.path("OPENAI_API_KEY").asText()));
+    }
+
+    @Test
     void shouldSwitchOpenAiOfficialWithoutDeletingUnrelatedCodexConfig() throws Exception {
         Path authPath = tempDir.resolve("auth.json");
         Path configPath = tempDir.resolve("config.toml");

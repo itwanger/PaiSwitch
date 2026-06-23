@@ -71,6 +71,18 @@ public class ProviderController {
         return ApiResponse.success(providerService.updateProvider(userId, code, TargetTool.fromQueryParam(tool), request));
     }
 
+    @Operation(summary = "Delete custom provider")
+    @DeleteMapping("/{code}")
+    @SecurityRequirement(name = "bearerAuth")
+    public ApiResponse<Void> deleteProvider(
+            @RequestHeader("Authorization") String authorization,
+            @PathVariable String code,
+            @RequestParam(required = false) String tool) {
+        Long userId = extractUserId(authorization);
+        providerService.deleteCustomProvider(userId, code, TargetTool.fromQueryParam(tool));
+        return ApiResponse.success(null);
+    }
+
     @Operation(summary = "Update provider configuration (baseUrl, modelName, modelNameSmall)")
     @PutMapping("/{code}/config")
     @SecurityRequirement(name = "bearerAuth")
